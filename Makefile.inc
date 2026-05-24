@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -Werror -Wpedantic -Wall
+CXXFLAGS = -std=c++17 -Werror -Wpedantic -Wall
 CXXFLAGS_R = $(CXXFLAGS) -O3 -DNDEBUG
 CXXFLAGS_D = $(CXXFLAGS) -g  -DDEBUG
 GTEST_LIBS = -lgtest -lgtest_main -lpthread
@@ -16,16 +16,24 @@ clean :
 	- rm *.hdrdep.bak
 
 cleanall : clean
-	- rm release debug debug_test utest
+	- rm release debug debug_test utest base85
 	- echo > Makefile.hdrdep
 
 mrproper : cleanall
 
 astyle:
-	astyle --options=../astyle.ini *.h *.cpp
+	@if command -v astyle >/dev/null 2>&1; then \
+		astyle --options=../astyle.ini *.h *.cpp; \
+	else \
+		echo "astyle not found, skipping"; \
+	fi
 
 tidy:
-	../tidy.sh
+	@bash ../tidy.sh
 
 depends :
-	makedepend -f Makefile.hdrdep *.c*
+	@if command -v makedepend >/dev/null 2>&1; then \
+		makedepend -f Makefile.hdrdep *.c*; \
+	else \
+		echo "makedepend not found, skipping header dependencies"; \
+	fi

@@ -1,58 +1,97 @@
-#include <iostream>
-#include <vector>
 #include <algorithm>
-#include <random>
 #include <iomanip>
+#include <iostream>
+#include <numeric>
+#include <random>
+#include <vector>
 
 #include "collvalue.h"
 #include "sorting.h"
 
-using CollInt = CollectingValue<int>;
+using CountedInt = CollectingValue<int>;
 
-// Random data
-std::vector<CollInt> generate_data(size_t n)
+// создает вектор от 0 до n-1
+auto make_data(std::size_t n) -> std::vector<CountedInt>
 {
-    std::vector<CollInt> data(n);
-    std::iota(data.begin(), data.end(), CollInt(0));
+    std::vector<CountedInt> data(n);
+    std::iota(data.begin(), data.end(), CountedInt(0));
     return data;
 }
 
-void shuffle_data(std::vector<CollInt>& data)
+// перемешивает элементы чтобы сортировкам было что делать
+void mix_data(std::vector<CountedInt>& data)
 {
-    std::shuffle(data.begin(), data.end(), std::mt19937{std::random_device{}()});
+    static std::mt19937 gen(42);
+    std::shuffle(data.begin(), data.end(), gen);
+}
+
+bool sorted_values(std::vector<CountedInt> const& data)
+{
+    return std::is_sorted(data.begin(), data.end(), [](CountedInt const& left, CountedInt const& right)
+    {
+        return left.value < right.value;
+    });
+}
+
+// печатает одну строку с результатами
+void print_stats(std::size_t n, char const* name)
+{
+    std::cout << std::setw(6) << n << "  "
+              << std::setw(12) << name << "  "
+              << std::setw(12) << CountedInt::comps << "  "
+              << std::setw(12) << CountedInt::swaps << "  "
+              << std::setw(12) << CountedInt::moves << '\n';
+}
+
+bool check_result(std::vector<CountedInt> const& data, std::size_t n, char const* name)
+{
+    if (sorted_values(data))
+    {
+        return true;
+    }
+
+    std::cerr << "sort failed: " << name << ", n = " << n << '\n';
+    return false;
 }
 
 int main()
 {
-    std::vector<size_t> sizes = {100, 500, 1000, 2000};
+    std::vector<std::size_t> sizes = {0, 1, 2, 10, 50, 100, 500, 1000};
+    bool ok = true;
 
-    std::cout << "N\tAlgo\t\tComps\t\tSwaps\t\tMoves\n";
-    std::cout << "----------------------------------------------------------------\n";
+    std::cout << std::setw(6) << "n" << "  "
+              << std::setw(12) << "algorithm" << "  "
+              << std::setw(12) << "comparisons" << "  "
+              << std::setw(12) << "swaps" << "  "
+              << std::setw(12) << "moves" << '\n';
 
-    for (size_t n : sizes)
+    for (auto n : sizes)
     {
-        auto number_data = generate_data(n);
+        auto base = make_data(n);
 
-        // --- Std Sort ---
-        shuffle_data(number_data);
-        CollInt::reset_stats();
-        std::sort(number_data.begin(), number_data.end());
-        std::cout << n << "\tstd::sort\t" << CollInt::comps << "\t\t" << CollInt::swaps << "\t\t" << CollInt::moves << "\n";
+        auto data = base;
+        mix_data(data);
+        CountedInt::reset_stats();
+        std::sort(data.begin(), data.end());
+        print_stats(n, "std::sort");
+        ok = check_result(data, n, "std::sort") && ok;
 
-        // --- Bubble Sort ---
-        shuffle_data(number_data);
-        CollInt::reset_stats();
-        bubble_sort(number_data.begin(), number_data.end());
-        std::cout << n << "\tBubble\t\t" << CollInt::comps << "\t\t" << CollInt::swaps << "\t\t" << CollInt::moves << "\n";
+        data = base;
+        mix_data(data);
+        CountedInt::reset_stats();
+        bubble_sort(data.begin(), data.end());
+        print_stats(n, "bubble");
+        ok = check_result(data, n, "bubble") && ok;
 
-        // --- Insertion Sort ---
-        shuffle_data(number_data);
-        CollInt::reset_stats();
-        quick_sort(number_data.begin(), number_data.end());
-        std::cout << n << "\tInsertion\t" << CollInt::comps << "\t\t" << CollInt::swaps << "\t\t" << CollInt::moves << "\n";
+        data = base;
+        mix_data(data);
+        CountedInt::reset_stats();
+        quick_sort(data.begin(), data.end());
+        print_stats(n, "quick");
+        ok = check_result(data, n, "quick") && ok;
 
-        std::cout << "--------------------------------------------------------------\n";
+        std::cout << '\n';
     }
 
-    return 0;
+    return ok ? 0 : 1;
 }

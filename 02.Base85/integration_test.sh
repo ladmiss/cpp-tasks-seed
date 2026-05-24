@@ -1,29 +1,52 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-status=true
+set -euo pipefail
 
-dd bs=512 count=1 if=/dev/random of=random.bin 2>/dev/null
-python -c 'import sys; import base64; sys.stdout.buffer.write(base64.b85encode(sys.stdin.buffer.read()))' <random.bin >random.b85
-
-# ---------------------------------------------------
-
-./base85 -e <random.bin >random.b85.test
-./base85 -d <random.b85 >random.bin.test
-
-if cmp -s random.b85 random.b85.test; then
-  echo Encoder ok!
+if command -v python3 >/dev/null 2>&1; then
+  PYTHON=python3
+elif command -v python >/dev/null 2>&1; then
+  PYTHON=python
 else
-  echo Encoder failed! >&2
-  status=false
+  echo "python not found" >&2
+  exit 1
 fi
 
-if cmp -s random.bin random.bin.test; then
-  echo Decoder ok!
-else
-  echo Decoder failed! >&2
-  status=false
-fi
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+status=0
 
-# ---------------------------------------------------
+check_case()
+{
+  local input=$1
+  local name=$2
 
-$status
+  "$PYTHON" -c 'import sys, base64; sys.stdout.buffer.write(base64.b85encode(sys.stdin.buffer.read()))' \
+    <"$input" >"$tmpdir/$name.ref.b85"
+
+  ./base85 -e <"$input" >"$tmpdir/$name.test.b85"
+  ./base85 -d <"$tmpdir/$name.ref.b85" >"$tmpdir/$name.test.bin"
+
+  if cmp -s "$tmpdir/$name.ref.b85" "$tmpdir/$name.test.b85"; then
+    echo "$name encoder ok"
+  else
+    echo "$name encoder failed" >&2
+    status=1
+  fi
+
+  if cmp -s "$input" "$tmpdir/$name.test.bin"; then
+    echo "$name decoder ok"
+  else
+    echo "$name decoder failed" >&2
+    status=1
+  fi
+}
+
+: >"$tmpdir/empty.bin"
+printf '1234567890abcdef short text for base85 test' >"$tmpdir/text.bin"
+dd bs=512 count=1 if=/dev/urandom of="$tmpdir/random.bin" 2>/dev/null
+
+check_case "$tmpdir/empty.bin" empty
+check_case "$tmpdir/text.bin" text
+check_case "$tmpdir/random.bin" random
+
+exit "$status"

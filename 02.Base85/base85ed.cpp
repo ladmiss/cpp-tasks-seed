@@ -1,117 +1,131 @@
-#include <vector>
-#include <cstdint>
-#include <string>
-#include <stdexcept>
-#include <cstring>
-#include <unistd.h>
-#include <sys/wait.h>
-#include <errno.h>
-
 #include "base85ed.h"
 
-// TODO: remove this
-static std::vector<uint8_t> run_command_io(const std::string &command,
-        const std::vector<uint8_t> &in)
+#include <algorithm>
+#include <cstdint>
+#include <stdexcept>
+#include <vector>
+
+namespace
 {
-    int inpipe[2];   // parent -> child
-    int outpipe[2];  // child -> parent
 
-    if (pipe(inpipe) == -1) throw std::runtime_error(strerror(errno));
-    if (pipe(outpipe) == -1)
+constexpr char alphabet[] =
+    "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
+constexpr uint8_t bad_char = 255;
+
+struct DecodeTable
+{
+    uint8_t values[256];
+
+    DecodeTable()
     {
-        close(inpipe[0]);
-        close(inpipe[1]);
-        throw std::runtime_error(strerror(errno));
-    }
+        std::fill(values, values + 256, bad_char);
 
-    pid_t pid = fork();
-    if (pid == -1)
-    {
-        close(inpipe[0]);
-        close(inpipe[1]);
-        close(outpipe[0]);
-        close(outpipe[1]);
-        throw std::runtime_error(strerror(errno));
-    }
-
-    if (pid == 0)
-    {
-        // child
-        dup2(inpipe[0], STDIN_FILENO);
-        dup2(outpipe[1], STDOUT_FILENO);
-        close(inpipe[0]);
-        close(inpipe[1]);
-        close(outpipe[0]);
-        close(outpipe[1]);
-        execl("/bin/sh", "sh", "-c", command.c_str(), (char*)nullptr);
-        _exit(127);
-    }
-
-    // parent
-    close(inpipe[0]);
-    close(outpipe[1]);
-
-    // write input
-    const uint8_t *wp = in.data();
-    ssize_t remaining = static_cast<ssize_t>(in.size());
-    while (remaining > 0)
-    {
-        ssize_t n = write(inpipe[1], wp, remaining);
-        if (n == -1)
+        for (uint8_t i = 0; i < 85; ++i)
         {
-            if (errno == EINTR) continue;
-            close(inpipe[1]);
-            close(outpipe[0]);
-            waitpid(pid, nullptr, 0);
-            throw std::runtime_error(strerror(errno));
+            values[static_cast<unsigned char>(alphabet[i])] = i;
         }
-        remaining -= n;
-        wp += n;
     }
-    close(inpipe[1]); // signal EOF
+};
 
-    // read all stdout
+const DecodeTable table;
+
+uint32_t read_block(std::vector<uint8_t> const &bytes, std::size_t start, std::size_t count)
+{
+    uint32_t value = 0;
+
+    // собираем блок как число из четырех байтов
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        value <<= 8;
+
+        if (i < count)
+        {
+            value |= bytes[start + i];
+        }
+    }
+
+    return value;
+}
+
+void write_block(std::vector<uint8_t> &out, uint32_t value, std::size_t count)
+{
+    // возвращаем нужное число байтов из блока
+    for (std::size_t i = 0; i < count; ++i)
+    {
+        auto shift = static_cast<unsigned>((3 - i) * 8);
+        out.push_back(static_cast<uint8_t>((value >> shift) & 0xFF));
+    }
+}
+
+} // namespace
+
+std::vector<uint8_t> base85::encode(std::vector<uint8_t> const &bytes)
+{
     std::vector<uint8_t> out;
-    uint8_t buf[4096];
-    while (true)
+    out.reserve((bytes.size() + 3) / 4 * 5);
+
+    for (std::size_t pos = 0; pos < bytes.size(); pos += 4)
     {
-        ssize_t n = read(outpipe[0], buf, sizeof(buf));
-        if (n > 0) out.insert(out.end(), buf, buf + n);
-        else if (n == 0) break;
-        else
+        std::size_t part = std::min<std::size_t>(4, bytes.size() - pos);
+        uint32_t value = read_block(bytes, pos, part);
+
+        char block[5];
+        for (int i = 4; i >= 0; --i)
         {
-            if (errno == EINTR) continue;
-            close(outpipe[0]);
-            waitpid(pid, nullptr, 0);
-            throw std::runtime_error(strerror(errno));
+            block[i] = alphabet[value % 85];
+            value /= 85;
+        }
+
+        // неполный последний блок дает на один символ больше чем байтов
+        for (std::size_t i = 0; i < part + 1; ++i)
+        {
+            out.push_back(static_cast<uint8_t>(block[i]));
         }
     }
-    close(outpipe[0]);
-
-    int status = 0;
-    if (waitpid(pid, &status, 0) == -1) throw std::runtime_error(strerror(errno));
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
-        throw std::runtime_error("child exited with non-zero status");
 
     return out;
 }
 
-
-// TODO: implement this in C++
-std::vector<uint8_t> base85::encode(std::vector<uint8_t> const &bytes)
+std::vector<uint8_t> base85::decode(std::vector<uint8_t> const &code)
 {
-    return run_command_io(
-               "/usr/bin/env -S python3 -c 'import sys; import base64; sys.stdout.buffer.write(base64.b85encode(sys.stdin.buffer.read()))'",
-               bytes
-           );
-}
+    std::vector<uint8_t> out;
+    out.reserve((code.size() + 4) / 5 * 4);
 
+    for (std::size_t pos = 0; pos < code.size(); pos += 5)
+    {
+        std::size_t part = std::min<std::size_t>(5, code.size() - pos);
 
-// TODO: implement this in C++
-std::vector<uint8_t> base85::decode(std::vector<uint8_t> const &b85str)
-{
-    return run_command_io(
-               "/usr/bin/env -S python3 -c 'import sys; import base64; sys.stdout.buffer.write(base64.b85decode(sys.stdin.buffer.read()))'",
-               b85str
-           );
+        if (part == 1)
+        {
+            throw std::invalid_argument("bad base85 length");
+        }
+
+        uint64_t value = 0;
+
+        // недостающие символы в конце считаем максимальной цифрой
+        for (std::size_t i = 0; i < 5; ++i)
+        {
+            uint8_t digit = 84;
+
+            if (i < part)
+            {
+                digit = table.values[code[pos + i]];
+                if (digit == bad_char)
+                {
+                    throw std::invalid_argument("bad base85 character");
+                }
+            }
+
+            value = value * 85 + digit;
+        }
+
+        if (value > 0xFFFFFFFFULL)
+        {
+            throw std::invalid_argument("base85 block is too large");
+        }
+
+        write_block(out, static_cast<uint32_t>(value), part - 1);
+    }
+
+    return out;
 }
