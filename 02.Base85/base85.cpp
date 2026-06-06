@@ -1,77 +1,82 @@
-#include "base85ed.h"
-
+#include <iostream>
+#include <vector>
 #include <cstdint>
 #include <functional>
-#include <iostream>
-#include <string>
-#include <vector>
 
-std::vector<uint8_t> read_input()
+#include "base85ed.h"
+
+std::vector<uint8_t> read_stdin_to_vector_iostream()
 {
-    constexpr std::streamsize buf_size = 64 * 1024;
-    std::vector<uint8_t> data;
-    std::vector<char> buf(buf_size);
+    constexpr std::streamsize BUF_SIZE = 64 * 1024;
+    std::vector<uint8_t> out;
+    out.reserve(1024);
+    std::vector<char> buf(BUF_SIZE);
 
+    // Ensure std::cin is in binary mode where applicable (no-op on POSIX).
     std::ios::sync_with_stdio(false);
 
-    // читаем поток до конца
     while (std::cin)
     {
-        std::cin.read(buf.data(), buf_size);
-        auto got = std::cin.gcount();
-
-        if (got > 0)
+        std::cin.read(buf.data(), BUF_SIZE);
+        std::streamsize n = std::cin.gcount();
+        if (n > 0)
         {
-            auto first = reinterpret_cast<uint8_t *>(buf.data());
-            auto last = reinterpret_cast<uint8_t *>(buf.data() + got);
-            data.insert(data.end(), first, last);
+            out.insert(out.end(), reinterpret_cast<uint8_t*>(buf.data()),
+                       reinterpret_cast<uint8_t*>(buf.data() + n));
+        }
+        if (n < BUF_SIZE)
+        {
+            // either EOF or error
+            break;
         }
     }
-
-    return data;
+    return out;
 }
 
-void write_output(std::vector<uint8_t> const &data)
+void write_vector_to_stdout(const std::vector<uint8_t>& data)
 {
+    // Ensure no tied flushing and faster IO (optional)
     std::ios::sync_with_stdio(false);
+    std::cout.setf(std::ios::fmtflags(0), std::ios::basefield); // no formatting changes
 
-    // пишем результат без лишнего форматирования
     if (!data.empty())
     {
-        std::cout.write(reinterpret_cast<char const *>(data.data()), data.size());
+        std::cout.write(reinterpret_cast<const char*>(data.data()), data.size());
     }
-
+    // flush to ensure data is written out
     std::cout.flush();
 }
 
-int main(int argc, char const *argv[])
+
+int main(int argc, const char *argv[])
 {
     if (argc != 2)
     {
-        std::cerr << "use -e or -d\n";
+        std::cerr << "Use -e or -d argument\n";
         return 1;
-    }
-
-    std::function<std::vector<uint8_t>(std::vector<uint8_t> const &)> action;
-    std::string mode = argv[1];
-
-    if (mode == "--encode" || mode == "-e")
-    {
-        action = base85::encode;
-    }
-    else if (mode == "--decode" || mode == "-d")
-    {
-        action = base85::decode;
     }
     else
     {
-        std::cerr << "unknown argument " << mode << "\n";
-        return 1;
-    }
+        std::function<std::vector<uint8_t>(const std::vector<uint8_t>&)> func = nullptr;
+        std::string a = argv[1];
+        if (a == "--encode" || a == "-e")
+        {
+            func = base85::encode;
+        }
+        else if (a == "--decode" || a == "-d")
+        {
+            func = base85::decode;
+        }
+        else
+        {
+            std::cerr << "Don't know how to deal with <" << a << ">, use -e or -d\n";
+            return 1;
+        }
 
-    auto input = read_input();
-    auto output = action(input);
-    write_output(output);
+        auto data = read_stdin_to_vector_iostream();
+        auto result = func(data);
+        write_vector_to_stdout(result);
+    }
 
     return 0;
 }

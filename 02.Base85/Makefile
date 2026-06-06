@@ -16,7 +16,7 @@ run_utest : utest
 
 run_itest : release
 	echo "Integration tests..."
-	bash ./integration_test.sh
+	./integration_test.sh
 
 all: depends run_utest run_itest
 

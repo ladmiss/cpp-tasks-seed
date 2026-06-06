@@ -1,72 +1,68 @@
 #ifndef COLLVALUE_H
 #define COLLVALUE_H
 
-#include <cstddef>
-#include <utility>
+// Header-only
 
-// небольшая обертка для подсчета операций
-template <typename T>
-class CollectingValue
+template <typename T> class CollectingValue
 {
 public:
-    static inline std::size_t comps = 0;
-    static inline std::size_t swaps = 0;
-    static inline std::size_t moves = 0;
+    static inline size_t comps = 0; // С С++17 можно!
+    static inline size_t swaps = 0;
+    static inline size_t moves = 0;
 
     T value;
 
-    // обычный конструктор
+    // Конструктор по умолчанию
     explicit CollectingValue(T val = T()) : value(val) {}
 
-    // копирование тоже считаем перемещением данных
+    // Копирование CollectingValue a = b;
     CollectingValue(const CollectingValue& other) : value(other.value)
     {
-        ++moves;
+        moves++;
     }
 
-    // перемещение объекта
+    // Перемещение CollectingValue a = std::move(b); -- любит std::sort!
     CollectingValue(CollectingValue&& other) noexcept : value(std::move(other.value))
     {
-        ++moves;
+        moves++;
     }
 
-    // присваивание копированием
+    // a = b;
     CollectingValue& operator=(const CollectingValue& other)
     {
         if (this != &other)
         {
             value = other.value;
-            ++moves;
+            moves++;
         }
         return *this;
     }
 
-    // присваивание перемещением
+    // a = std::move(b);
     CollectingValue& operator=(CollectingValue&& other) noexcept
     {
         if (this != &other)
         {
             value = std::move(other.value);
-            ++moves;
+            moves++;
         }
         return *this;
     }
 
-    // сравнение для сортировок
+    // a < b
     bool operator<(const CollectingValue& other) const
     {
-        ++comps;
+        comps++;
         return value < other.value;
     }
 
-    // нужно для std::iota
+    // Для std::iota
     CollectingValue& operator++()
     {
         ++value;
         return *this;
     }
 
-    // сброс счетчиков перед новым запуском
     static void reset_stats()
     {
         comps = 0;
@@ -75,12 +71,21 @@ public:
     }
 };
 
-// считаем перестановки
+/*
+Внутри std::sort (упрощенно)
+template <class RandomIt> void sort(RandomIt first, RandomIt last) {
+    // ...
+    using std::swap; // 1. Делаем std::swap видимым (страховка)
+    swap(*i, *j);    // 2. Вызываем swap
+    // ...
+}
+*/
+// Кастомный swap, будет найдена автоматически при вызове std::swap для CollectingValue
 template <typename T>
-void swap(CollectingValue<T>& left, CollectingValue<T>& right)
+void swap(CollectingValue<T>& a, CollectingValue<T>& b)
 {
-    ++CollectingValue<T>::swaps;
-    std::swap(left.value, right.value);
+    CollectingValue<T>::swaps++;
+    std::swap(a.value, b.value);
 }
 
-#endif
+#endif // COLLVALUE_H
